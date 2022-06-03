@@ -8,6 +8,7 @@ fonttools==4.33.3
 greenlet==1.1.2
 idna==3.3
 kiwisolver==1.4.2
+mailchimp-marketing==3.0.75
 matplotlib==3.5.2
 munkres==1.1.4
 numpy==1.22.3

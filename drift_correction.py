@@ -5,6 +5,9 @@ import warnings
 import os
 import statsmodels.api as sm
 from sqlalchemy import create_engine
+import pytz
+import mailchimp_marketing as MailchimpMarketing
+from mailchimp_marketing.api_client import ApiClientError
 
 #######################
 # Utility functions   #
@@ -37,6 +40,19 @@ def get_surveys(engine):
         return
     
     return surveys
+
+def get_flood_status(engine):
+    try:
+        flood_status = pd.read_sql_table("flood_status", engine).sort_values(['place','sensor_ID'])
+    except:
+        flood_status = pd.DataFrame()
+        warnings.warn("Connection to database failed to return data")
+        
+    if flood_status.shape[0] == 0:
+        warnings.warn("- No flood status data!")
+        return
+    
+    return flood_status
 
 
 def qa_qc_flag(x, delta_wd_per_minute = 0.1):
@@ -190,6 +206,139 @@ def postgres_upsert(table, conn, keys, data_iter):
     )
     conn.execute(upsert_statement)
     
+    
+def detect_flooding(x):
+    latest_measurements = x.sort_values(["sensor_ID", "date"]).groupby("sensor_ID").tail(3).reset_index()
+    latest_measurements["sample_interval"] = latest_measurements["date"] - latest_measurements.groupby(by="sensor_ID")["date"].shift(1)
+    latest_measurements["min_interval"] = latest_measurements.groupby("sensor_ID")["sample_interval"].transform('min')
+    
+    current_time = pd.to_datetime(datetime.datetime.utcnow(), utc=True)
+    
+    
+    last_measurement = latest_measurements.sort_values("date").groupby("sensor_ID").tail(1)
+    last_measurement["above_alert_wl"] = last_measurement["sensor_water_level_adj"] >= last_measurement["alert_threshold"]
+    last_measurement["time_since_measurement"] = current_time - last_measurement["date"]
+    last_measurement["cutoff_time"] = datetime.timedelta(minutes=40)
+    last_measurement["is_flooding"] = (last_measurement["time_since_measurement"] > last_measurement["cutoff_time"]) & last_measurement["above_alert_wl"]
+    last_measurement["alert_sent"] = False
+    last_measurement["current_time"] = current_time
+    
+    last_measurement.rename(columns = {"date":"latest_measurement"}, inplace = True)
+    # last_measurement.set_index(["place","sensor_ID"], inplace=True)
+    
+    return last_measurement.loc[:,["place","sensor_ID", "latest_measurement","current_time","is_flooding","alert_sent"]]
+
+def send_alert(place):
+    
+    list_id = os.environ.get("MAILCHIMP_LIST_ID")
+    interest_category_id = os.environ.get("MAILCHIMP_INTEREST_ID")
+    
+    formatted_place = place.replace("North Carolina", "NC")
+    
+    # Get options of places for flood alerts
+    try:
+        client = MailchimpMarketing.Client()
+        client.set_config({
+            "api_key": os.environ.get("MAILCHIMP_KEY"),
+            "server": "us20"
+        })
+
+        site_options = client.lists.list_interest_category_interests(list_id, interest_category_id)
+        
+    except ApiClientError as error:
+        site_options = dict()
+        print("Error: {}".format(error.text))
+  
+    site_options_df = pd.DataFrame.from_dict(site_options["interests"])
+    interest_value_df = site_options_df.query("name == @formatted_place").copy()
+    
+    if interest_value_df.shape[0] == 0:
+        return (formatted_place + " is not registered as an option for the listserv")
+    
+    # Get current time when flood was detected
+    flood_time = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%H:%M%p %Z on %m/%d/%Y")
+    flood_date = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
+    
+    # Create new campaign
+    try:
+        new_campaign = client.campaigns.create({"type": "plaintext", "recipients":{"segment_opts":{"match": "all","conditions":[{"condition_type": "Interests","field": ("interests-"+interest_category_id),"op": "interestcontains","value": list(interest_value_df.id.values)}]},"list_id": list_id},"tracking": {"opens": False,"text_clicks": False},"settings": {"subject_line": "Flood Alert - Sunny Day Flooding Project","preview_text": ("Flood alert for "+formatted_place),"title": (formatted_place +" Flood Alert - "+ flood_date),"from_name": "Sunny Day Flooding Project","reply_to": "sunnydayflood@gmail.com","use_conversation": True,"to_name": "*|FNAME|* *|LNAME|*","auto_footer": False}})                                        
+    except:
+        new_campaign = dict()
+        warnings.warn("Failed to create campaign")
+        return
+    
+    # Save new campaign's ID for updating/sending
+    new_campaign_id = new_campaign.get("id")
+    
+    # Update the email content with appropriate info
+    try:
+        response = client.campaigns.set_content(new_campaign_id, {"plain_text":"Flood Alert for "+formatted_place+
+                       "\n--------------------------------\n\nWater estimated on/near roadway at: "+ 
+                       flood_time+
+                       ".\n\nVisit our data viewer to see live data and pictures of the site:\nhttps://go.unc.edu/flood-data\n\nThis alert is informed by preliminary data and is for INFORMATIONAL PURPOSES ONLY. Please refer to your local National Weather Service station for actionable flooding info: https://water.weather.gov/ahps/region.php?state=nc  \n\n================================\nYou are receiving this email because you opted in via our website: https://tarheels.live/sunnydayflood\n\nUnsubscribe *|HTML:EMAIL|* from this list: *|UNSUB|*\n\nUpdate Profile: *|UPDATE_PROFILE|*\n\nOur mailing address is:\nSunny Day Flooding Project\n223 E Cameron Ave\nNew East Building, CB#3140\nChapel Hill, NC 27599-3140\nUSA"})
+    except ApiClientError as error:
+        print("Error: {}".format(error.text))
+    
+    # Send the new campaign!
+    try:
+        response = client.campaigns.send(new_campaign_id)
+        print("Alert successfully sent for: ", formatted_place)
+    except:
+        warnings.warn("Error sending alert for: "+ formatted_place)
+        
+        
+def alert_flooding(x, engine):
+    # was it flooding
+    flood_status_df = get_flood_status(engine)
+    
+    # is it flooding now
+    is_flooding_df = detect_flooding(x)
+    
+    places = list(is_flooding_df["place"].unique())
+    
+    for selected_place in places:
+        site_data = is_flooding_df.query("place == @selected_place").copy()
+        flood_status_site = flood_status_df.query("place == @selected_place").copy()
+        
+        any_flooding = site_data["is_flooding"].sum() > 0
+        
+        if any_flooding:
+            site_flooding_data = site_data.query("is_flooding == True").copy()
+            
+            match flood_status_site["alert_sent"].sum() > 0:
+                case True:
+                    site_flooding_data["alert_sent"] = True
+                    print("Flooding detected, but alert previously sent for:" , selected_place)
+                    
+                    try:
+                        site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                        print("Flood status data written to database for:", selected_place)
+                    except:
+                        warnings.warn("Error writing flood status data to database")
+                    
+                
+                case False:
+                    send_alert(selected_place)
+                    
+                    site_flooding_data["alert_sent"] = True
+                    print("Flooding detected. ALERT sent for:" , selected_place)
+                    
+                    try:
+                        site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                        print("Flood status data written to database for:", selected_place)
+                    except:
+                        warnings.warn("Error writing flood status data to database")
+                    
+                
+        else:
+            try:
+                site_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                print("No flood alert sent for:", selected_place)
+            except:
+                warnings.warn("Error writing flood status data to database")
+            
+    return
+
 
 def main():
 
@@ -222,7 +371,20 @@ def main():
     except:
         warnings.warn("Error writing drift-corrected data to database")
     
+    
+    ###################
+    #  Flood alerts  #
+    ###################
+   
+    alert_flooding(x = drift_corrected_df, engine = engine)
+    
+    #############################
+    # Cleanup the DB connection #
+    #############################
+    
     engine.dispose()
+    
+    
 
 if __name__ == "__main__":
     main()
