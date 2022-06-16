@@ -304,33 +304,35 @@ def alert_flooding(x, engine):
         
         if any_flooding:
             site_flooding_data = site_data.query("is_flooding == True").copy()
+            alert_already_sent = (flood_status_site["alert_sent"].sum() > 0)
             
-            match flood_status_site["alert_sent"].sum() > 0:
-                case True:
-                    site_flooding_data["alert_sent"] = True
-                    print("Flooding detected, but alert previously sent for:" , selected_place)
+            if alert_already_sent:
+                site_flooding_data["alert_sent"] = True
+                print("Flooding detected, but alert previously sent for:" , selected_place)
                     
-                    try:
-                        site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
-                        print("Flood status data written to database for:", selected_place)
-                    except:
-                        warnings.warn("Error writing flood status data to database")
-                    
-                
-                case False:
-                    send_alert(selected_place)
-                    
-                    site_flooding_data["alert_sent"] = True
-                    print("Flooding detected. ALERT sent for:" , selected_place)
-                    
-                    try:
-                        site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
-                        print("Flood status data written to database for:", selected_place)
-                    except:
-                        warnings.warn("Error writing flood status data to database")
+                try:
+                    site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                    print("Flood status data written to database for:", selected_place)
+                except:
+                    warnings.warn("Error writing flood status data to database")
                     
                 
+            elif not alert_already_sent:
+                send_alert(selected_place)
+                site_flooding_data["alert_sent"] = True
+                # print("Flooding detected. ALERT sent for:" , selected_place)
+                
+                try:
+                    site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                    print("Flood status data written to database for:", selected_place)
+                except:
+                    warnings.warn("Error writing flood status data to database")
+            
+            else:
+                warnings.warn("Error determining if flood alert has been sent") 
+                    
         else:
+            print("no flooding detected")
             try:
                 site_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
                 print("No flood alert sent for:", selected_place)
