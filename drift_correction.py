@@ -289,10 +289,12 @@ def send_alert(place):
         
 def alert_flooding(x, engine):
     # was it flooding
-    flood_status_df = get_flood_status(engine)
+    flood_status_df = get_flood_status(engine).query("alerts_on == True").copy()
+    
+    active_alert_sites = list(flood_status_df.sensor_ID)
     
     # is it flooding now
-    is_flooding_df = detect_flooding(x)
+    is_flooding_df = detect_flooding(x).query("sensor_ID in @active_alert_sites").copy()
     
     places = list(is_flooding_df["place"].unique())
     
@@ -319,8 +321,8 @@ def alert_flooding(x, engine):
                 
             elif not alert_already_sent:
                 send_alert(selected_place)
+                
                 site_flooding_data["alert_sent"] = True
-                # print("Flooding detected. ALERT sent for:" , selected_place)
                 
                 try:
                     site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
@@ -332,7 +334,6 @@ def alert_flooding(x, engine):
                 warnings.warn("Error determining if flood alert has been sent") 
                     
         else:
-            print("no flooding detected")
             try:
                 site_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
                 print("No flood alert sent for:", selected_place)
