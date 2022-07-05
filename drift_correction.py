@@ -115,6 +115,7 @@ def calc_baseline_wl(x, surveys):
     smoothed_baseline_wl = pd.DataFrame()
 
     for selected_sensor in sensor_list:
+        # print(selected_sensor)
         selected_data = x.query("sensor_ID == @selected_sensor")
         selected_survey = surveys.query("sensor_ID == @selected_sensor")
         
@@ -138,7 +139,8 @@ def smooth_baseline_wl(x):
     smoothed_baseline_wl = pd.DataFrame()
     
     for selected_survey in survey_dates:
-        selected_data = x.query("date_surveyed == @selected_survey")
+        # print(selected_survey)
+        selected_data = x.query("date_surveyed == @selected_survey").copy()
     
         rolling_min = selected_data.set_index("date")["sensor_water_depth"].rolling('2d').min().reset_index()
         rolling_min.rename(columns={'sensor_water_depth':'rolling_min_wd'}, inplace = True)
@@ -161,10 +163,10 @@ def smooth_baseline_wl(x):
             merged_data_and_change_pts["smooth_min_wd"] = merged_data_and_change_pts["smooth_min_wd"].interpolate(method="pad").interpolate(method="backfill")
             
         if change_pts.shape[0] >= 3:
-            x = np.array(change_pts["date"].astype('int'))
+            x1 = np.array(change_pts["date"].astype('int'))
             y = np.array(change_pts["rolling_min_wd"])
             b = np.array(change_pts)
-            z = sm.nonparametric.lowess(y, x)
+            z = sm.nonparametric.lowess(y, x1)
         
             smoothed_min_wl = pd.DataFrame(z).rename(columns={0:"date",1:"smooth_min_wd"})
             smoothed_min_wl["date"] = pd.to_datetime(smoothed_min_wl["date"], utc=True)
