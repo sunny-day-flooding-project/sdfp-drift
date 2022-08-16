@@ -451,8 +451,9 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
             site_keep_list.append(site_keep)
             
         if sum(site_keep_list) == 0:
-            pass
-            # return "No new flood events"
+            # pass
+            print("No new flood events")
+            return 
         
         new_flood_events = site_flood_start_stop[site_keep_list].reset_index()
         
