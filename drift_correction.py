@@ -19,7 +19,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 #######################
 
 def get_wd_w_buffer(start_date, end_date, engine):
-    new_start_date = start_date - datetime.timedelta(days = 7)
+    new_start_date = start_date - datetime.timedelta(days = 31)
     
     try:
         new_data = pd.read_sql_query(f"SELECT * FROM sensor_water_depth WHERE date >= '{new_start_date}' AND date <= '{end_date}'", engine).sort_values(['place','date']).drop_duplicates()
