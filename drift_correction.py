@@ -19,7 +19,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 #######################
 
 def get_wd_w_buffer(start_date, end_date, engine):
-    new_start_date = start_date - datetime.timedelta(days = 25)
+    new_start_date = start_date - datetime.timedelta(days = 7)
     
     try:
         new_data = pd.read_sql_query(f"SELECT * FROM sensor_water_depth WHERE date >= '{new_start_date}' AND date <= '{end_date}'", engine).sort_values(['place','date']).drop_duplicates()
@@ -593,8 +593,7 @@ def main():
     #####################
 
     end_date = pd.to_datetime(datetime.datetime.utcnow())
-    end_date = end_date - datetime.timedelta(days=7)
-    start_date = end_date - datetime.timedelta(days=25)
+    start_date = end_date - datetime.timedelta(days=7)
 
     new_data = get_wd_w_buffer(start_date, end_date, engine)
     surveys = get_surveys(engine)
@@ -614,7 +613,7 @@ def main():
     #  Flood alerts  #
     ###################
    
-    # alert_flooding(x = drift_corrected_df, engine = engine)
+    alert_flooding(x = drift_corrected_df, engine = engine)
     
     #######################################
     #  Update flood tracking spreadsheet  #
