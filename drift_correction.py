@@ -161,7 +161,8 @@ def smooth_baseline_wl(x):
         # print(selected_survey)
         selected_data = x.query("date_surveyed == @selected_survey").copy()
     
-        rolling_min = selected_data.set_index("date")["sensor_water_depth"].rolling('2d').min().reset_index()
+        # rolling_min = selected_data.set_index("date")["sensor_water_depth"].rolling('2d').min().reset_index()
+        rolling_min = selected_data.set_index("date")["sensor_water_depth"].rolling('2d').quantile(0.04).reset_index()
         rolling_min.rename(columns={'sensor_water_depth':'rolling_min_wd'}, inplace = True)
         rolling_min["lag_min_wd"] = rolling_min["rolling_min_wd"] - rolling_min["rolling_min_wd"].shift(1)
         rolling_min["lag_duration_minutes"] = (rolling_min["date"] - rolling_min["date"].shift(1)).dt.total_seconds() / 60
