@@ -22,7 +22,7 @@ def get_wd_w_buffer(start_date, end_date, engine):
     new_start_date = start_date - datetime.timedelta(days = 7)
     
     try:
-        new_data = pd.read_sql_query(f"SELECT * FROM sensor_water_depth WHERE \"sensor_ID\"!='CB_03' AND date >= '{new_start_date}' AND date <= '{end_date}'", engine).sort_values(['place','date']).drop_duplicates()
+        new_data = pd.read_sql_query(f"SELECT * FROM sensor_water_depth WHERE date >= '{new_start_date}' AND date <= '{end_date}'", engine).sort_values(['place','date']).drop_duplicates()
     except:
         new_data = pd.DataFrame()
         warnings.warn("Connection to database failed to return data")
