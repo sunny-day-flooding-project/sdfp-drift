@@ -117,7 +117,7 @@ def match_measurements_to_survey(measurements, surveys):
             
         if number_of_surveys > 1:
             survey_dates.append(pd.to_datetime(datetime.datetime.utcnow(), utc=True))
-            selected_measurements["date_surveyed"] = pd.to_datetime(pd.cut(selected_measurements["date"], bins = survey_dates, labels = survey_dates[:-1]), utc = True)
+            selected_measurements["date_surveyed"] = pd.to_datetime(pd.cut(selected_measurements["date"], bins = survey_dates, labels = survey_dates[:-1]), utc = True).astype('datetime64[ns, UTC]')
     
         merged_measurements_and_surveys = pd.merge(selected_measurements, surveys, how = "left", on = ["place","sensor_ID","date_surveyed"])
         
