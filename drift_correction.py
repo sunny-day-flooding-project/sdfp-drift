@@ -465,14 +465,19 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
         new_site_data_df = pd.concat([new_site_data_df,new_site_data])
     
     # Get pictures that align
-    new_site_data_df_w_pics = get_pictures_for_flooding(new_site_data_df)
+    # new_site_data_df_w_pics = get_pictures_for_flooding(new_site_data_df)
+
+    new_site_data_df['pic_links'] = ''
+    new_site_data_df['date_added'] = pd.to_datetime(datetime.datetime.utcnow())
     
     # Convert full df of new flood events to string so we can write them to a google spreadsheet
-    new_site_data_df_w_pics = new_site_data_df_w_pics.astype('str')
+    # new_site_data_df_w_pics = new_site_data_df_w_pics.astype('str')
+    new_site_data_df = new_site_data_df.astype('str')
     
     # Append new values the google sheet!
     try:
-        write_to_sheet = worksheet.append_rows(values = new_site_data_df_w_pics.values.tolist(), value_input_option="USER_ENTERED")
+        # write_to_sheet = worksheet.append_rows(values = new_site_data_df_w_pics.values.tolist(), value_input_option="USER_ENTERED")
+        write_to_sheet = worksheet.append_rows(values = new_site_data_df.values.tolist(), value_input_option="USER_ENTERED")
         print("Wrote new flood events to spreadsheet")
     except:
         print("Whoops! An error writing flood events to spreadsheet")
