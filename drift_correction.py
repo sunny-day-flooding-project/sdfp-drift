@@ -414,6 +414,9 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
         site_existing_data = flood_start_stop.query("place == @selected_place").copy().reset_index()
         
         last_flood_number = pd.to_numeric(site_existing_data.flood_event).max()
+        if (pd.isna(last_flood_number)):
+            last_flood_number = 0
+            
         site_data["flood_event"] = flood_counter(site_data.date, start_number = 0, lag_hrs = 2)
         
         flood_events_occuring = site_data.groupby("flood_event").max_date.max() > current_time
