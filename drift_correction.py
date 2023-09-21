@@ -455,9 +455,8 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
             site_keep_list.append(site_keep)
             
         if sum(site_keep_list) == 0:
-            # pass
             print("No new flood events")
-            return 
+            pass
         
         new_flood_events = site_flood_start_stop[site_keep_list].reset_index()
         
@@ -467,6 +466,10 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
         new_site_data = new_site_data.loc[:,['place','sensor_ID','flood_event', 'date', 'road_water_level_adj', 'road_water_level', 'drift', 'voltage']]
         new_site_data_df = pd.concat([new_site_data_df,new_site_data])
     
+    if (new_site_data_df.size == 0):
+        print("No new flood events to write to spreadsheet")
+        return
+
     # Get pictures that align
     # new_site_data_df_w_pics = get_pictures_for_flooding(new_site_data_df)
 
