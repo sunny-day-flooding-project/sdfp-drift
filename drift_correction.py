@@ -368,7 +368,8 @@ def alert_flooding(x, engine):
 def update_tracking_spreadsheet(data, flood_cutoff = 0):
     x=data.copy()
     
-    current_time = pd.Timestamp('now', tz= "UTC") + pd.offsets.Hour(-172) # 7 days + 4 hours
+    # current_time = pd.Timestamp('now', tz= "UTC") + pd.offsets.Hour(-172) # 7 days + 4 hours
+    current_time = pd.Timestamp('now', tz= "UTC") + pd.offsets.Hour(-4)
     
     flooding_measurements = x.reset_index().query("road_water_level_adj > @flood_cutoff").copy()
     
