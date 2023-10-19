@@ -368,7 +368,7 @@ def alert_flooding(x, engine):
 def update_tracking_spreadsheet(data, flood_cutoff = 0):
     x=data.copy()
     
-    current_time = pd.Timestamp('now', tz= "UTC") + pd.offsets.Hour(-4)
+    current_time = pd.Timestamp('now', tz= "UTC") + pd.offsets.Hour(-172) # 7 days + 4 hours
     
     flooding_measurements = x.reset_index().query("road_water_level_adj > @flood_cutoff").copy()
     
@@ -620,7 +620,14 @@ def main():
     except:
         warnings.warn("Error writing drift-corrected data to database")
     
-    
+    # try:
+    #     new_data['processed'] = True
+    #     new_data.set_index(['place', 'sensor_ID', 'date'], inplace=True)
+    #     new_data.to_sql('sensor_water_depth', engine, if_exists = "append", method=postgres_upsert, chunksize = 3000) 
+    #     print("Sensor water depth data marked as processed")
+    # except:
+    #     warnings.warn("Error marking sensor water depth data as processed")
+
     ###################
     #  Flood alerts  #
     ###################
