@@ -639,7 +639,7 @@ def main():
     #  Update flood tracking spreadsheet  #
     #######################################
     
-    update_tracking_spreadsheet(data = drift_corrected_df, flood_cutoff = 0)
+    # update_tracking_spreadsheet(data = drift_corrected_df, flood_cutoff = 0)
     
     #############################
     # Cleanup the DB connection #
