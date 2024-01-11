@@ -405,14 +405,15 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
     
     # Iterate through each place, compare overlap of each flood event in our new data and the existing data in the spreadsheet
     # If there is no overlap, collect the flood event data to then write to spreadsheet
-    places = list(flooding_measurements["place"].unique())
+    # places = list(flooding_measurements["place"].unique())
+    sensors = list(flooding_measurements["sensor_ID"].unique())
     
     new_site_data_df = pd.DataFrame()
     
-    for selected_place in places:
-        print(selected_place)
-        site_data = flooding_measurements.query("place == @selected_place").copy()
-        site_existing_data = flood_start_stop.query("place == @selected_place").copy().reset_index()
+    for selected_sensor in sensors:
+        print(selected_sensor)
+        site_data = flooding_measurements.query("sensor_ID == @selected_sensor").copy()
+        site_existing_data = flood_start_stop.query("sensor_ID == @selected_sensor").copy().reset_index()
         
         last_flood_number = pd.to_numeric(site_existing_data.flood_event).max()
         if (pd.isna(last_flood_number)):
