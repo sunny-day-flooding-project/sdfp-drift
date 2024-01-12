@@ -10,5 +10,5 @@ COPY . .
 
 EXPOSE 5432
 
-# CMD ["python", "drift_correction.py"]
-CMD ["python", "temp.py"]
+CMD ["python", "drift_correction.py"]
+# CMD ["python", "temp.py"]
