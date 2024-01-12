@@ -608,7 +608,7 @@ def main():
 
     # end_date = pd.to_datetime(datetime.datetime.utcnow())
     # start_date = end_date - datetime.timedelta(days=7)
-    end_date = '2023-01-06'
+    end_date = '2024-01-06'
     start_date = '2023-12-15'
 
     new_data = get_wd_w_buffer(start_date, end_date, engine)
