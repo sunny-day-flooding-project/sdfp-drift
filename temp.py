@@ -608,8 +608,8 @@ def main():
 
     # end_date = pd.to_datetime(datetime.datetime.utcnow())
     # start_date = end_date - datetime.timedelta(days=7)
-    end_date = '2023-12-29'
-    start_date = '2023-12-07'
+    end_date = '2023-12-15'
+    start_date = '2023-11-21'
 
     new_data = get_wd_w_buffer(start_date, end_date, engine)
     surveys = get_surveys(engine)
