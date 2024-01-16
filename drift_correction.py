@@ -622,13 +622,13 @@ def main():
     except:
         warnings.warn("Error writing drift-corrected data to database")
     
-    # try:
-    #     new_data['processed'] = True
-    #     new_data.set_index(['place', 'sensor_ID', 'date'], inplace=True)
-    #     new_data.to_sql('sensor_water_depth', engine, if_exists = "append", method=postgres_upsert, chunksize = 3000) 
-    #     print("Sensor water depth data marked as processed")
-    # except:
-    #     warnings.warn("Error marking sensor water depth data as processed")
+    try:
+        new_data['processed'] = True
+        new_data.set_index(['place', 'sensor_ID', 'date'], inplace=True)
+        new_data.to_sql('sensor_water_depth', engine, if_exists = "append", method=postgres_upsert, chunksize = 3000) 
+        print("Sensor water depth data marked as processed")
+    except:
+        warnings.warn("Error marking sensor water depth data as processed")
 
     ###################
     #  Flood alerts  #
