@@ -248,9 +248,9 @@ def detect_flooding(x):
     last_measurement.rename(columns = {"date":"latest_measurement"}, inplace = True)
     # last_measurement.set_index(["place","sensor_ID"], inplace=True)
     
-    return last_measurement.loc[:,["place","sensor_ID", "latest_measurement","current_time","is_flooding","alert_sent"]]
+    return last_measurement.loc[:,["place","sensor_ID", "latest_measurement","current_time","is_flooding","alert_sent", "date_surveyed", "sensor_water_level_adj", "road_water_level_adj"]]
 
-def send_alert(place):
+def send_alert(place, flooding_data):
     
     list_id = os.environ.get("MAILCHIMP_LIST_ID")
     interest_category_id = os.environ.get("MAILCHIMP_INTEREST_ID")
@@ -280,6 +280,15 @@ def send_alert(place):
     # Get current time when flood was detected
     flood_time = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%H:%M%p %Z on %m/%d/%Y")
     flood_date = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
+    alert_details = []
+    for _, measurement in flooding_data.iterrows():
+        water_level_difference_inches = abs(measurement["road_water_level_adj"] - measurement["sensor_water_level_adj"]) * 12
+        sensor_label = measurement["sensor_label"]
+        if measurement["sensor_water_level_adj"] > measurement["road_water_level_adj"]:
+            alert_details.append(f"Water detected over the roadway by {water_level_difference_inches:.1f} inches at {sensor_label}")
+        else:
+            alert_details.append(f"Water detected within {water_level_difference_inches:.1f} inches of the roadway at {sensor_label}")
+    alert_details = "\n".join(alert_details)
     
     # Create new campaign
     try:
@@ -295,8 +304,8 @@ def send_alert(place):
     # Update the email content with appropriate info
     try:
         response = client.campaigns.set_content(new_campaign_id, {"plain_text":"Flood Alert for "+formatted_place+
-                       "\n--------------------------------\n\nWater estimated on/near roadway at: "+ 
-                       flood_time+
+                   "\n--------------------------------\n\n" + alert_details + " at " +
+                   flood_time+
                        ".\n\nVisit our data viewer to see live data and pictures of the site:\nhttps://go.unc.edu/flood-data\n\nThis alert is informed by preliminary data and is for INFORMATIONAL PURPOSES ONLY. Please refer to your local National Weather Service station for actionable flooding info: https://water.weather.gov/ahps/region.php?state=nc  \n\n================================\nYou are receiving this email because you opted in via our website: https://tarheels.live/sunnydayflood\n\nUnsubscribe *|HTML:EMAIL|* from this list: *|UNSUB|*\n\nUpdate Profile: *|UPDATE_PROFILE|*\n\nOur mailing address is:\nSunny Day Flooding Project\n223 E Cameron Ave\nNew East Building, CB#3140\nChapel Hill, NC 27599-3140\nUSA"})
     except ApiClientError as error:
         print("Error: {}".format(error.text))
@@ -317,6 +326,9 @@ def alert_flooding(x, engine):
     
     # is it flooding now
     is_flooding_df = detect_flooding(x).query("sensor_ID in @active_alert_sites").copy()
+    surveys = get_surveys(engine)
+    survey_labels = surveys.loc[:, ["place", "sensor_ID", "date_surveyed", "sensor_label"]].drop_duplicates()
+    is_flooding_df = is_flooding_df.merge(survey_labels, on=["place", "sensor_ID", "date_surveyed"], how="left")
     
     places = list(is_flooding_df["place"].unique())
     
@@ -335,19 +347,19 @@ def alert_flooding(x, engine):
                 print("Flooding detected, but alert previously sent for:" , selected_place)
                     
                 try:
-                    site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                    site_flooding_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
                     print("Flood status data written to database for:", selected_place)
                 except:
                     warnings.warn("Error writing flood status data to database")
                     
                 
             elif not alert_already_sent:
-                send_alert(selected_place)
+                send_alert(selected_place, site_flooding_data)
                 
                 site_flooding_data["alert_sent"] = True
                 
                 try:
-                    site_flooding_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                    site_flooding_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
                     print("Flood status data written to database for:", selected_place)
                 except:
                     warnings.warn("Error writing flood status data to database")
@@ -357,7 +369,7 @@ def alert_flooding(x, engine):
                     
         else:
             try:
-                site_data.set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
+                site_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
                 print("No flood alert sent for:", selected_place)
             except:
                 warnings.warn("Error writing flood status data to database")
