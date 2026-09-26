@@ -282,12 +282,12 @@ def send_alert(place, flooding_data):
     flood_date = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
     alert_details = []
     for _, measurement in flooding_data.iterrows():
-        water_level_difference_inches = abs(measurement["road_water_level_adj"] - measurement["sensor_water_level_adj"]) * 12
+        road_water_level_inches = measurement["road_water_level_adj"] * 12
         sensor_label = measurement["sensor_label"]
-        if measurement["sensor_water_level_adj"] > measurement["road_water_level_adj"]:
-            alert_details.append(f"Water detected over the roadway by {water_level_difference_inches:.1f} inches at {sensor_label}")
+        if road_water_level_inches > 0:
+            alert_details.append(f"Water detected {road_water_level_inches:.1f} inches above the road at {sensor_label}")
         else:
-            alert_details.append(f"Water detected within {water_level_difference_inches:.1f} inches of the roadway at {sensor_label}")
+            alert_details.append(f"Water detected within {abs(road_water_level_inches):.1f} inches of the road at {sensor_label}")
     alert_details = "\n".join(alert_details)
     
     # Create new campaign
