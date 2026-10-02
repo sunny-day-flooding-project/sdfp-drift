@@ -243,19 +243,6 @@ def detect_flooding(x, previous_flood_status=None):
     last_measurement["is_current"] = last_measurement["time_since_measurement"] <= datetime.timedelta(minutes=40)
     last_measurement["is_comms_down"] = last_measurement["time_since_measurement"] > datetime.timedelta(minutes=180)
 
-    # Taken from the truth table defining flood, warning, not-flooding, and unknown states
-    flood_or_warning = (
-        last_measurement["above_alert_wl"] & ~last_measurement["is_comms_down"]
-    ) | (
-        last_measurement["above_road_wl"] & last_measurement["is_current"] & ~last_measurement["is_comms_down"]
-    )
-    not_flood = (
-        ~last_measurement["above_alert_wl"]
-        & last_measurement["is_current"]
-        & ~last_measurement["is_comms_down"]
-        & ~last_measurement["above_road_wl"]
-    )
-
     # if the flood status is unknown leave the previous flood status as is
     if previous_flood_status is not None:
         previous_flood_status = previous_flood_status.loc[:, ["place", "sensor_ID", "is_flooding"]].rename(columns={"is_flooding": "previous_is_flooding"})
@@ -264,10 +251,28 @@ def detect_flooding(x, previous_flood_status=None):
     else:
         last_measurement["previous_is_flooding"] = False
 
-    
-    last_measurement["is_flooding"] = last_measurement["previous_is_flooding"]      # Start by preserving the previous value for rows with an unknown status.
-    last_measurement.loc[not_flood & ~flood_or_warning, "is_flooding"] = False      # A definite not-flooding result sets the value to False.
-    last_measurement.loc[flood_or_warning, "is_flooding"] = True                    # A flood or warning result sets the value to True.
+    # Compute masks after the merge so their indexes align with last_measurement.
+    flood_or_warning = (
+        last_measurement["above_alert_wl"] & ~last_measurement["is_comms_down"]
+    ) | (
+        last_measurement["above_road_wl"]
+        & last_measurement["is_current"]
+        & ~last_measurement["is_comms_down"]
+    )
+    not_flood = (
+        ~last_measurement["above_alert_wl"]
+        & last_measurement["is_current"]
+        & ~last_measurement["is_comms_down"]
+        & ~last_measurement["above_road_wl"]
+    )
+
+    # Preserve the previous value for unknown cases, then apply definite outcomes.
+    last_measurement["is_flooding"] = last_measurement["previous_is_flooding"]
+    is_flooding_column = last_measurement.columns.get_loc("is_flooding")
+    not_flood_rows = np.flatnonzero((not_flood & ~flood_or_warning).to_numpy(dtype=bool))
+    flood_rows = np.flatnonzero(flood_or_warning.to_numpy(dtype=bool))
+    last_measurement.iloc[not_flood_rows, is_flooding_column] = False
+    last_measurement.iloc[flood_rows, is_flooding_column] = True
     last_measurement["alert_sent"] = False
     last_measurement["current_time"] = current_time
     
