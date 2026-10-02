@@ -1,4 +1,7 @@
 from select import select
+from functools import wraps
+import inspect
+import logging
 import pandas as pd
 import numpy as np
 import datetime
@@ -14,10 +17,47 @@ from mailchimp_marketing.api_client import ApiClientError
 from googleapiclient.discovery import build
 from oauth2client.service_account import ServiceAccountCredentials
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+def _summarize_log_value(value):
+    """Return a compact, safe summary of a function argument for logging."""
+    if isinstance(value, pd.DataFrame):
+        return f"DataFrame(shape={value.shape}, columns={list(value.columns)})"
+    if isinstance(value, pd.Series):
+        return f"Series(name={value.name!r}, length={len(value)})"
+    if isinstance(value, (str, int, float, bool, type(None), datetime.date, datetime.datetime, datetime.timedelta)):
+        summary = repr(value)
+        return summary if len(summary) <= 100 else summary[:97] + "..."
+    return type(value).__name__
+
+
+def log_function_entry(function):
+    """Log each function entry with timestamped, non-sensitive argument summaries."""
+    signature = inspect.signature(function)
+
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        bound_arguments = signature.bind_partial(*args, **kwargs)
+        argument_summary = {
+            name: _summarize_log_value(value)
+            for name, value in bound_arguments.arguments.items()
+        }
+        logger.info("Entering %s | arguments=%s", function.__name__, argument_summary)
+        return function(*args, **kwargs)
+
+    return wrapper
+
 #######################
 # Utility functions   #
 #######################
 
+@log_function_entry
 def get_wd_w_buffer(start_date, end_date, engine):
     new_start_date = start_date - datetime.timedelta(days = 7)
     
@@ -33,6 +73,7 @@ def get_wd_w_buffer(start_date, end_date, engine):
     
     return new_data
 
+@log_function_entry
 def get_drift_corrected_data(start_date, end_date, engine):
     try:
         new_data = pd.read_sql_query(f"SELECT * FROM data_for_display WHERE date >= '{start_date}' AND date <= '{end_date}'", engine).sort_values(['place','date']).drop_duplicates()
@@ -47,6 +88,7 @@ def get_drift_corrected_data(start_date, end_date, engine):
     return new_data
 
 
+@log_function_entry
 def get_surveys(engine):
     try:
         surveys = pd.read_sql_table("sensor_surveys", engine).sort_values(['place','date_surveyed']).drop_duplicates()
@@ -60,6 +102,7 @@ def get_surveys(engine):
     
     return surveys
 
+@log_function_entry
 def get_flood_status(engine):
     try:
         flood_status = pd.read_sql_table("flood_status", engine).sort_values(['place','sensor_ID'])
@@ -74,6 +117,7 @@ def get_flood_status(engine):
     return flood_status
 
 
+@log_function_entry
 def qa_qc_flag(x, delta_wd_per_minute = 0.1):
     
     x["lag_sensor_water_depth"] = x["sensor_water_depth"] - x.groupby(by="sensor_ID")["sensor_water_depth"].shift(1)
@@ -86,6 +130,7 @@ def qa_qc_flag(x, delta_wd_per_minute = 0.1):
     return x
 
 
+@log_function_entry
 def match_measurements_to_survey(measurements, surveys):
     sites = measurements["sensor_ID"].unique()
     survey_sites = surveys["sensor_ID"].unique()
@@ -128,6 +173,7 @@ def match_measurements_to_survey(measurements, surveys):
     return matched_measurements
 
 
+@log_function_entry
 def calc_baseline_wl(x, surveys):
     sensor_list = list(x["sensor_ID"].unique())
     
@@ -152,6 +198,7 @@ def calc_baseline_wl(x, surveys):
     return smoothed_baseline_wl
 
 
+@log_function_entry
 def smooth_baseline_wl(x):
     survey_dates = list(x["date_surveyed"].unique())
     
@@ -198,6 +245,7 @@ def smooth_baseline_wl(x):
 
     return smoothed_baseline_wl
 
+@log_function_entry
 def correct_drift(x, start_date, end_date):
     data = x.copy().reset_index()
     
@@ -216,6 +264,7 @@ def correct_drift(x, start_date, end_date):
     return filtered_x.set_index(["place", "sensor_ID", "date"])
 
 
+@log_function_entry
 def postgres_upsert(table, conn, keys, data_iter):
     from sqlalchemy.dialects.postgresql import insert
 
@@ -229,6 +278,7 @@ def postgres_upsert(table, conn, keys, data_iter):
     conn.execute(upsert_statement)
     
     
+@log_function_entry
 def detect_flooding(x, previous_flood_status=None):
     latest_measurements = x.sort_values(["sensor_ID", "date"]).groupby("sensor_ID").tail(3).reset_index()
     latest_measurements["sample_interval"] = latest_measurements["date"] - latest_measurements.groupby(by="sensor_ID")["date"].shift(1)
@@ -281,6 +331,7 @@ def detect_flooding(x, previous_flood_status=None):
     
     return last_measurement.loc[:,["place","sensor_ID", "latest_measurement","current_time","is_flooding","alert_sent", "date_surveyed", "sensor_water_level_adj", "road_water_level_adj"]]
 
+@log_function_entry
 def send_alert(place, flooding_data):
     
     list_id = os.environ.get("MAILCHIMP_LIST_ID")
@@ -300,7 +351,7 @@ def send_alert(place, flooding_data):
         
     except ApiClientError as error:
         site_options = dict()
-        print("Error: {}".format(error.text))
+        logger.error("Error: %s", error.text)
   
     site_options_df = pd.DataFrame.from_dict(site_options["interests"])
     interest_value_df = site_options_df.query("name == @formatted_place").copy()
@@ -339,16 +390,17 @@ def send_alert(place, flooding_data):
                    flood_time+
                        ".\n\nVisit our data viewer to see live data and pictures of the site:\nhttps://go.unc.edu/flood-data\n\nThis alert is informed by preliminary data and is for INFORMATIONAL PURPOSES ONLY. Please refer to your local National Weather Service station for actionable flooding info: https://water.weather.gov/ahps/region.php?state=nc  \n\n================================\nYou are receiving this email because you opted in via our website: https://tarheels.live/sunnydayflood\n\nUnsubscribe *|HTML:EMAIL|* from this list: *|UNSUB|*\n\nUpdate Profile: *|UPDATE_PROFILE|*\n\nOur mailing address is:\nSunny Day Flooding Project\n223 E Cameron Ave\nNew East Building, CB#3140\nChapel Hill, NC 27599-3140\nUSA"})
     except ApiClientError as error:
-        print("Error: {}".format(error.text))
+        logger.error("Error: %s", error.text)
     
     # Send the new campaign!
     try:
         response = client.campaigns.send(new_campaign_id)
-        print("Alert successfully sent for: ", formatted_place)
+        logger.info("Alert successfully sent for: %s", formatted_place)
     except:
-        warnings.warn("Error sending alert for: "+ formatted_place)
+        logger.exception("Error sending alert for: %s", formatted_place)
         
         
+@log_function_entry
 def alert_flooding(x, engine):
     # was it flooding
     flood_status_df = get_flood_status(engine).query("alerts_on == True").copy()
@@ -375,13 +427,13 @@ def alert_flooding(x, engine):
             
             if alert_already_sent:
                 site_flooding_data["alert_sent"] = True
-                print("Flooding detected, but alert previously sent for:" , selected_place)
+                logger.info("Flooding detected, but alert previously sent for: %s", selected_place)
                     
                 try:
                     site_flooding_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
-                    print("Flood status data written to database for:", selected_place)
+                    logger.info("Flood status data written to database for: %s", selected_place)
                 except:
-                    warnings.warn("Error writing flood status data to database")
+                    logger.exception("Error writing flood status data to database")
                     
                 
             elif not alert_already_sent:
@@ -391,23 +443,24 @@ def alert_flooding(x, engine):
                 
                 try:
                     site_flooding_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
-                    print("Flood status data written to database for:", selected_place)
+                    logger.info("Flood status data written to database for: %s", selected_place)
                 except:
-                    warnings.warn("Error writing flood status data to database")
+                    logger.exception("Error writing flood status data to database")
             
             else:
-                warnings.warn("Error determining if flood alert has been sent") 
+                logger.warning("Error determining if flood alert has been sent") 
                     
         else:
             try:
                 site_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
-                print("No flood alert sent for:", selected_place)
+                logger.info("No flood alert sent for: %s", selected_place)
             except:
-                warnings.warn("Error writing flood status data to database")
+                logger.exception("Error writing flood status data to database")
             
     return
 
 
+@log_function_entry
 def update_tracking_spreadsheet(data, flood_cutoff = 0):
     x=data.copy()
     
@@ -465,7 +518,7 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
     new_site_data_df = pd.DataFrame()
     
     for selected_sensor in sensors:
-        print(selected_sensor)
+        logger.info("Processing sensor: %s", selected_sensor)
         site_data = flooding_measurements.query("sensor_ID == @selected_sensor").copy()
         site_existing_data = flood_start_stop.query("sensor_ID == @selected_sensor").copy().reset_index()
         
@@ -511,7 +564,7 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
             site_keep_list.append(site_keep)
             
         if sum(site_keep_list) == 0:
-            print("No new flood events")
+            logger.info("No new flood events")
             pass
         
         new_flood_events = site_flood_start_stop[site_keep_list].reset_index()
@@ -523,7 +576,7 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
         new_site_data_df = pd.concat([new_site_data_df,new_site_data])
     
     if (new_site_data_df.size == 0):
-        print("No new flood events to write to spreadsheet")
+        logger.info("No new flood events to write to spreadsheet")
         return
 
     # Get pictures that align
@@ -540,12 +593,13 @@ def update_tracking_spreadsheet(data, flood_cutoff = 0):
     try:
         # write_to_sheet = worksheet.append_rows(values = new_site_data_df_w_pics.values.tolist(), value_input_option="USER_ENTERED")
         write_to_sheet = worksheet.append_rows(values = new_site_data_df.values.tolist(), value_input_option="USER_ENTERED")
-        print("Wrote new flood events to spreadsheet")
+        logger.info("Wrote new flood events to spreadsheet")
     except:
-        print("Whoops! An error writing flood events to spreadsheet")
+        logger.exception("Whoops! An error writing flood events to spreadsheet")
         
     return
 
+@log_function_entry
 def get_pictures_for_flooding(data):
     host_os = os.getenv("HOST_OS")
     if host_os and host_os.lower() == "windows":
@@ -630,11 +684,12 @@ def get_pictures_for_flooding(data):
                     
                 rows_with_pics = pd.concat([rows_with_pics, selected_day_data])
         else:
-            print("No camera folder for this site: CAM_" + selected_sensor_id)
+            logger.info("No camera folder for this site: CAM_%s", selected_sensor_id)
         
     return x.merge(rows_with_pics.loc[:,["place","sensor_ID","date","pic_links"]], on = ["place","sensor_ID","date"], how="left").loc[:,x_cols]
         
     
+@log_function_entry
 def flood_counter(dates, start_number = 0, lag_hrs = 8):
     dates = dates.copy().reset_index().date
     lagged_time = dates - dates.shift(1)
@@ -656,6 +711,7 @@ def flood_counter(dates, start_number = 0, lag_hrs = 8):
 
 
 
+@log_function_entry
 def main():
 
     ########################
@@ -683,17 +739,17 @@ def main():
 
     try:
         drift_corrected_df.to_sql("data_for_display", engine, if_exists = "append", method=postgres_upsert, chunksize = 3000)
-        print("Drift-corrected data written to database!")
+        logger.info("Drift-corrected data written to database!")
     except:
-        warnings.warn("Error writing drift-corrected data to database")
+        logger.exception("Error writing drift-corrected data to database")
     
     try:
         new_data['processed'] = True
         new_data.set_index(['place', 'sensor_ID', 'date'], inplace=True)
         new_data.to_sql('sensor_water_depth', engine, if_exists = "append", method=postgres_upsert, chunksize = 3000) 
-        print("Sensor water depth data marked as processed")
+        logger.info("Sensor water depth data marked as processed")
     except:
-        warnings.warn("Error marking sensor water depth data as processed")
+        logger.exception("Error marking sensor water depth data as processed")
 
     ###################
     #  Flood alerts  #
