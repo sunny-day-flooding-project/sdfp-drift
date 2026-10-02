@@ -289,7 +289,7 @@ def detect_flooding(x, previous_flood_status=None):
     last_measurement = latest_measurements.sort_values("date").groupby("sensor_ID").tail(1)
     last_measurement["time_since_measurement"] = current_time - last_measurement["date"]
     last_measurement["above_alert_wl"] = last_measurement["sensor_water_level_adj"] >= last_measurement["alert_threshold"]
-    last_measurement["above_road_wl"] = last_measurement["sensor_water_level"] >= last_measurement["road_elevation"]
+    last_measurement["above_road_wl"] = last_measurement["sensor_water_level_adj"] >= last_measurement["road_elevation"]
     last_measurement["is_current"] = last_measurement["time_since_measurement"] <= datetime.timedelta(minutes=40)
     last_measurement["is_comms_down"] = last_measurement["time_since_measurement"] > datetime.timedelta(minutes=180)
 
@@ -309,6 +309,29 @@ def detect_flooding(x, previous_flood_status=None):
         & last_measurement["is_current"]
         & ~last_measurement["is_comms_down"]
     )
+
+    # for only when flood_or_warning is True, log detailed information about the measurement
+    for _, measurement in last_measurement.iloc[
+        np.flatnonzero(flood_or_warning.to_numpy(dtype=bool))
+    ].iterrows():
+        logger.info(
+            "flood_or_warning=True | place=%s sensor_ID=%s measurement_time=%s "
+            "sensor_water_level_adj=%s alert_threshold=%s road_elevation=%s "
+            "time_since_measurement=%s above_alert_wl=%s above_road_wl=%s "
+            "is_current=%s is_comms_down=%s",
+            measurement["place"],
+            measurement["sensor_ID"],
+            measurement["date"],
+            measurement["sensor_water_level_adj"],
+            measurement["alert_threshold"],
+            measurement["road_elevation"],
+            measurement["time_since_measurement"],
+            measurement["above_alert_wl"],
+            measurement["above_road_wl"],
+            measurement["is_current"],
+            measurement["is_comms_down"],
+        )
+
     not_flood = (
         ~last_measurement["above_alert_wl"]
         & last_measurement["is_current"]
