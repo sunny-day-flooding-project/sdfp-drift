@@ -229,19 +229,45 @@ def postgres_upsert(table, conn, keys, data_iter):
     conn.execute(upsert_statement)
     
     
-def detect_flooding(x):
+def detect_flooding(x, previous_flood_status=None):
     latest_measurements = x.sort_values(["sensor_ID", "date"]).groupby("sensor_ID").tail(3).reset_index()
     latest_measurements["sample_interval"] = latest_measurements["date"] - latest_measurements.groupby(by="sensor_ID")["date"].shift(1)
     latest_measurements["min_interval"] = latest_measurements.groupby("sensor_ID")["sample_interval"].transform('min')
     
     current_time = pd.to_datetime(datetime.datetime.utcnow(), utc=True)
     
-    
     last_measurement = latest_measurements.sort_values("date").groupby("sensor_ID").tail(1)
-    last_measurement["above_alert_wl"] = last_measurement["sensor_water_level_adj"] >= last_measurement["alert_threshold"]
     last_measurement["time_since_measurement"] = current_time - last_measurement["date"]
-    last_measurement["cutoff_time"] = datetime.timedelta(minutes=40)
-    last_measurement["is_flooding"] = (last_measurement["time_since_measurement"] > last_measurement["cutoff_time"]) & last_measurement["above_alert_wl"]
+    last_measurement["above_alert_wl"] = last_measurement["sensor_water_level_adj"] >= last_measurement["alert_threshold"]
+    last_measurement["above_road_wl"] = last_measurement["sensor_water_level"] >= last_measurement["road_elevation"]
+    last_measurement["is_current"] = last_measurement["time_since_measurement"] <= datetime.timedelta(minutes=40)
+    last_measurement["is_comms_down"] = last_measurement["time_since_measurement"] > datetime.timedelta(minutes=180)
+
+    # Taken from the truth table defining flood, warning, not-flooding, and unknown states
+    flood_or_warning = (
+        last_measurement["above_alert_wl"] & ~last_measurement["is_comms_down"]
+    ) | (
+        last_measurement["above_road_wl"] & last_measurement["is_current"] & ~last_measurement["is_comms_down"]
+    )
+    not_flood = (
+        ~last_measurement["above_alert_wl"]
+        & last_measurement["is_current"]
+        & ~last_measurement["is_comms_down"]
+        & ~last_measurement["above_road_wl"]
+    )
+
+    # if the flood status is unknown leave the previous flood status as is
+    if previous_flood_status is not None:
+        previous_flood_status = previous_flood_status.loc[:, ["place", "sensor_ID", "is_flooding"]].rename(columns={"is_flooding": "previous_is_flooding"})
+        last_measurement = last_measurement.merge(previous_flood_status, on=["place", "sensor_ID"], how="left")
+        last_measurement["previous_is_flooding"] = last_measurement["previous_is_flooding"].fillna(False)
+    else:
+        last_measurement["previous_is_flooding"] = False
+
+    
+    last_measurement["is_flooding"] = last_measurement["previous_is_flooding"]      # Start by preserving the previous value for rows with an unknown status.
+    last_measurement.loc[not_flood & ~flood_or_warning, "is_flooding"] = False      # A definite not-flooding result sets the value to False.
+    last_measurement.loc[flood_or_warning, "is_flooding"] = True                    # A flood or warning result sets the value to True.
     last_measurement["alert_sent"] = False
     last_measurement["current_time"] = current_time
     
@@ -325,7 +351,7 @@ def alert_flooding(x, engine):
     active_alert_sites = list(flood_status_df.sensor_ID)
     
     # is it flooding now
-    is_flooding_df = detect_flooding(x).query("sensor_ID in @active_alert_sites").copy()
+    is_flooding_df = detect_flooding(x, previous_flood_status=flood_status_df).query("sensor_ID in @active_alert_sites").copy()
     surveys = get_surveys(engine)
     survey_labels = surveys.loc[:, ["place", "sensor_ID", "date_surveyed", "sensor_label"]].drop_duplicates()
     is_flooding_df = is_flooding_df.merge(survey_labels, on=["place", "sensor_ID", "date_surveyed"], how="left")
