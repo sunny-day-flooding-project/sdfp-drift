@@ -302,20 +302,20 @@ def detect_flooding(x, previous_flood_status=None):
         last_measurement["previous_is_flooding"] = False
 
     # Compute masks after the merge so their indexes align with last_measurement.
-    flood_or_warning = (
-        last_measurement["above_alert_wl"] & ~last_measurement["is_comms_down"]
-    ) | (
-        last_measurement["above_road_wl"]
-        & last_measurement["is_current"]
-        & ~last_measurement["is_comms_down"]
+    flood = ~last_measurement["is_comms_down"] & (
+        (last_measurement["above_alert_wl"] & ~last_measurement["is_current"])
+        | (
+            last_measurement["above_road_wl"]
+            & (last_measurement["above_alert_wl"] | last_measurement["is_current"])
+        )
     )
 
-    # for only when flood_or_warning is True, log detailed information about the measurement
+    # Log detailed information for flood conditions.
     for _, measurement in last_measurement.iloc[
-        np.flatnonzero(flood_or_warning.to_numpy(dtype=bool))
+        np.flatnonzero(flood.to_numpy(dtype=bool))
     ].iterrows():
         logger.info(
-            "flood_or_warning=True | place=%s sensor_ID=%s measurement_time=%s "
+            "flood=True | place=%s sensor_ID=%s measurement_time=%s "
             "sensor_water_level_adj=%s alert_threshold=%s road_elevation=%s "
             "time_since_measurement=%s above_alert_wl=%s above_road_wl=%s "
             "is_current=%s is_comms_down=%s",
@@ -333,17 +333,17 @@ def detect_flooding(x, previous_flood_status=None):
         )
 
     not_flood = (
-        ~last_measurement["above_alert_wl"]
-        & last_measurement["is_current"]
+        last_measurement["is_current"]
         & ~last_measurement["is_comms_down"]
         & ~last_measurement["above_road_wl"]
+        & ~flood
     )
 
     # Preserve the previous value for unknown cases, then apply definite outcomes.
     last_measurement["is_flooding"] = last_measurement["previous_is_flooding"]
     is_flooding_column = last_measurement.columns.get_loc("is_flooding")
-    not_flood_rows = np.flatnonzero((not_flood & ~flood_or_warning).to_numpy(dtype=bool))
-    flood_rows = np.flatnonzero(flood_or_warning.to_numpy(dtype=bool))
+    not_flood_rows = np.flatnonzero(not_flood.to_numpy(dtype=bool))
+    flood_rows = np.flatnonzero(flood.to_numpy(dtype=bool))
     last_measurement.iloc[not_flood_rows, is_flooding_column] = False
     last_measurement.iloc[flood_rows, is_flooding_column] = True
     last_measurement["alert_sent"] = False
