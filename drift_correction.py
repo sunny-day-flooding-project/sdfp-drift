@@ -338,6 +338,8 @@ def detect_flooding(x, previous_flood_status=None):
         & ~last_measurement["above_road_wl"]
         & ~flood
     )
+    last_measurement["flood"] = flood
+    last_measurement["not_flood"] = not_flood
 
     # Preserve the previous value for unknown cases, then apply definite outcomes.
     last_measurement["is_flooding"] = last_measurement["previous_is_flooding"]
@@ -352,7 +354,13 @@ def detect_flooding(x, previous_flood_status=None):
     last_measurement.rename(columns = {"date":"latest_measurement"}, inplace = True)
     # last_measurement.set_index(["place","sensor_ID"], inplace=True)
     
-    return last_measurement.loc[:,["place","sensor_ID", "latest_measurement","current_time","is_flooding","alert_sent", "date_surveyed", "sensor_water_level_adj", "road_water_level_adj"]]
+    return last_measurement.loc[:,[
+        "place", "sensor_ID", "latest_measurement", "current_time", "is_flooding",
+        "alert_sent", "date_surveyed", "sensor_water_level_adj", "road_water_level_adj",
+        "alert_threshold", "road_elevation", "time_since_measurement", "above_alert_wl",
+        "above_road_wl", "is_current", "is_comms_down", "flood", "not_flood",
+        "previous_is_flooding",
+    ]]
 
 @log_function_entry
 def send_alert(place, flooding_data):
@@ -382,17 +390,27 @@ def send_alert(place, flooding_data):
     if interest_value_df.shape[0] == 0:
         return (formatted_place + " is not registered as an option for the listserv")
     
-    # Get current time when flood was detected
-    flood_time = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%H:%M%p %Z on %m/%d/%Y")
-    flood_date = datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
+    latest_observation_time = pd.to_datetime(
+        flooding_data["latest_measurement"], utc=True
+    ).max().tz_convert("US/Eastern")
+    flood_date = latest_observation_time.strftime("%m/%d/%Y")
     alert_details = []
     for _, measurement in flooding_data.iterrows():
         road_water_level_inches = measurement["road_water_level_adj"] * 12
         sensor_label = measurement["sensor_label"]
+        observation_time = pd.to_datetime(
+            measurement["latest_measurement"], utc=True
+        ).tz_convert("US/Eastern").strftime("%I:%M %p %Z on %m/%d/%Y")
         if road_water_level_inches > 0:
-            alert_details.append(f"Water detected {road_water_level_inches:.1f} inches above the road at {sensor_label}")
+            alert_details.append(
+                f"Water detected {road_water_level_inches:.1f} inches above the road "
+                f"at {sensor_label}, observed at {observation_time}"
+            )
         else:
-            alert_details.append(f"Water detected within {abs(road_water_level_inches):.1f} inches of the road at {sensor_label}")
+            alert_details.append(
+                f"Water detected within {abs(road_water_level_inches):.1f} inches of the road "
+                f"at {sensor_label}, observed at {observation_time}"
+            )
     alert_details = "\n".join(alert_details)
     
     # Create new campaign
@@ -409,8 +427,7 @@ def send_alert(place, flooding_data):
     # Update the email content with appropriate info
     try:
         response = client.campaigns.set_content(new_campaign_id, {"plain_text":"Flood Alert for "+formatted_place+
-                   "\n--------------------------------\n\n" + alert_details + " at " +
-                   flood_time+
+               "\n--------------------------------\n\n" + alert_details +
                        ".\n\nVisit our data viewer to see live data and pictures of the site:\nhttps://go.unc.edu/flood-data\n\nThis alert is informed by preliminary data and is for INFORMATIONAL PURPOSES ONLY. Please refer to your local National Weather Service station for actionable flooding info: https://water.weather.gov/ahps/region.php?state=nc  \n\n================================\nYou are receiving this email because you opted in via our website: https://tarheels.live/sunnydayflood\n\nUnsubscribe *|HTML:EMAIL|* from this list: *|UNSUB|*\n\nUpdate Profile: *|UPDATE_PROFILE|*\n\nOur mailing address is:\nSunny Day Flooding Project\n223 E Cameron Ave\nNew East Building, CB#3140\nChapel Hill, NC 27599-3140\nUSA"})
     except ApiClientError as error:
         logger.error("Error: %s", error.text)
@@ -474,6 +491,41 @@ def alert_flooding(x, engine):
                 logger.warning("Error determining if flood alert has been sent") 
                     
         else:
+            for _, measurement in site_data.iterrows():
+                prior_sensor_status = flood_status_site.loc[
+                    flood_status_site["sensor_ID"] == measurement["sensor_ID"],
+                    "alert_sent",
+                ]
+                previous_alert_sent = (
+                    bool(prior_sensor_status.fillna(False).any())
+                    if not prior_sensor_status.empty
+                    else False
+                )
+                logger.info(
+                    "alert_sent=False persisted | place=%s sensor_ID=%s "
+                    "previous_alert_sent=%s is_flooding=%s previous_is_flooding=%s "
+                    "flood=%s not_flood=%s measurement_time=%s "
+                    "sensor_water_level_adj=%s alert_threshold=%s road_elevation=%s "
+                    "time_since_measurement=%s above_alert_wl=%s above_road_wl=%s "
+                    "is_current=%s is_comms_down=%s; no sensors at this place "
+                    "were classified as flooding",
+                    measurement["place"],
+                    measurement["sensor_ID"],
+                    previous_alert_sent,
+                    measurement["is_flooding"],
+                    measurement["previous_is_flooding"],
+                    measurement["flood"],
+                    measurement["not_flood"],
+                    measurement["latest_measurement"],
+                    measurement["sensor_water_level_adj"],
+                    measurement["alert_threshold"],
+                    measurement["road_elevation"],
+                    measurement["time_since_measurement"],
+                    measurement["above_alert_wl"],
+                    measurement["above_road_wl"],
+                    measurement["is_current"],
+                    measurement["is_comms_down"],
+                )
             try:
                 site_data.loc[:, ["place", "sensor_ID", "latest_measurement", "current_time", "is_flooding", "alert_sent"]].set_index(["place","sensor_ID"]).to_sql("flood_status", engine, if_exists = "append", method=postgres_upsert)
                 logger.info("No flood alert sent for: %s", selected_place)
