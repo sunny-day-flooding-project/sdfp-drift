@@ -403,7 +403,7 @@ def send_alert(place, flooding_data):
         ).tz_convert("US/Eastern").strftime("%I:%M %p %Z on %m/%d/%Y")
         if road_water_level_inches > 0:
             alert_details.append(
-                f"Water detected {road_water_level_inches:.1f} inches above the road "
+                f"Water detected above the road "
                 f"at {sensor_label}, observed at {observation_time}"
             )
         else:
